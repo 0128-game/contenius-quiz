@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>累積反復型フラッシュカード</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f0f2f5; margin: 0; padding: 20px; }
+        #setup-container, #app-container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 90%; max-width: 600px; text-align: center; }
+        textarea { width: 100%; height: 150px; margin: 10px 0; border: 1px solid #ccc; border-radius: 8px; padding: 10px; font-size: 14px; }
+        #card { height: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 2px solid #333; border-radius: 15px; margin: 20px 0; padding: 20px; background-color: #fff; position: relative; }
+        .label { font-size: 0.9rem; color: #666; margin-bottom: 10px; }
+        .content { font-size: 1.8rem; font-weight: bold; }
+        .answer { color: #d9534f; margin-top: 20px; font-size: 1.5rem; }
+        .hidden { display: none; }
+        .status { font-size: 0.8rem; color: #888; margin-top: 10px; }
+        .hint { margin-top: 20px; font-size: 0.85rem; color: #555; background: #eee; padding: 10px; border-radius: 5px; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 1rem; }
+        button:hover { background: #0056b3; }
+        kbd { background: #eee; border: 1px solid #ccc; border-radius: 3px; padding: 2px 4px; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+
+<div id="setup-container">
+    <h2>CSVデータを入力してください</h2>
+    <p style="font-size: 0.8rem; color: #666;">形式: 年代,出来事 (例: 1206,チンギス＝ハンが...)</p>
+    <textarea id="csvInput" placeholder="1206,チンギス＝ハンがモンゴルを統一する&#10;1221,承久の乱がおこる&#10;1232,御成敗式目が制定される"></textarea>
+    <br>
+    <button onclick="startApp()">学習開始</button>
+</div>
+
+<div id="app-container" class="hidden">
+    <div id="progress-header">
+        <strong id="set-title">第1セット：年代 ➔ 出来事</strong><br>
+        <span id="step-info" class="status"></span>
+    </div>
+    
+    <div id="card">
+        <div id="card-label" class="label"></div>
+        <div id="card-question" class="content"></div>
+        <div id="card-answer" class="answer hidden"></div>
+    </div>
+
+    <div id="controls" class="hint">
+        <span id="instruction"></span>
+    </div>
+    <div class="status">間違えたら <kbd>M</kbd> キーで最初から</div>
+</div>
+
+<script>
+    let rawData = [];
+    let currentSet = 1; // 1: Year->Event, 2: Event->Year
+    let maxIdx = 0; // 現在どこまでの単語を学習範囲にしているか (0 to N-1)
+    let subStepIdx = 0; // 累積サイクル内での現在の進捗
+    let isReviewMode = false; // 知識学習(false)かクイズ(true)か
+    let isShowingAnswer = false; // クイズの回答を表示中か
+
+    const setupDiv = document.getElementById('setup-container');
+    const appDiv = document.getElementById('app-container');
+    const cardQuestion = document.getElementById('card-question');
+    const cardAnswer = document.getElementById('card-answer');
+    const cardLabel = document.getElementById('card-label');
+    const instruction = document.getElementById('instruction');
+    const stepInfo = document.getElementById('step-info');
+    const setTitle = document.getElementById('set-title');
+
+    function startApp() {
+        const text = document.getElementById('csvInput').value.trim();
+        if (!text) return alert("データを入力してください");
+        
+        rawData = text.split('\n').map(line => line.split(',').map(item => item.trim()));
+        setupDiv.classList.add('hidden');
+        appDiv.classList.remove('hidden');
+        
+        initSet(1);
+    }
+
+    function initSet(setNum) {
+        currentSet = setNum;
+        maxIdx = 0;
+        subStepIdx = 0;
+        isReviewMode = false;
+        isShowingAnswer = false;
+        setTitle.innerText = setNum === 1 ? "＜第1セット＞ 年代 ➔ 出来事" : "＜第2セット＞ 出来事 ➔ 年代";
+        updateDisplay();
+    }
+
+    function updateDisplay() {
+        const currentItem = rawData[maxIdx];
+        const subItem = rawData[subStepIdx];
+        
+        cardAnswer.classList.add('hidden');
+        isShowingAnswer = false;
+
+        if (!isReviewMode) {
+            // 知識学習モード（新しいカードを覚える）
+            cardLabel.innerText = "【知識学習】";
+            cardQuestion.innerText = currentSet === 1 
+                ? `${currentItem[0]}：${currentItem[1]}` 
+                : `${currentItem[1]}：${currentItem[0]}`;
+            instruction.innerHTML = "<kbd>Space</kbd> を押してクイズへ";
+            stepInfo.innerText = `新規学習中: ${maxIdx + 1} / ${rawData.length}`;
+        } else {
+            // クイズモード（1からmaxIdxまでを順に復習）
+            cardLabel.innerText = `【クイズ】 (${subStepIdx + 1} / ${maxIdx + 1})`;
+            cardQuestion.innerText = currentSet === 1 ? `${subItem[0]} に起こったのは？` : `${subItem[1]} の年代は？`;
+            instruction.innerHTML = "<kbd>Space</kbd> で回答を表示";
+            stepInfo.innerText = `反復トレーニング中 (範囲: 1～${maxIdx + 1})`;
+        }
+    }
+
+    function showAnswer() {
+        const subItem = rawData[subStepIdx];
+        cardAnswer.innerText = currentSet === 1 ? subItem[1] : subItem[0];
+        cardAnswer.classList.remove('hidden');
+        instruction.innerHTML = "正解なら <kbd>Space</kbd> / 間違えたら <kbd>M</kbd>";
+        isShowingAnswer = true;
+    }
+
+    function handleInput(key) {
+        if (key === ' ') {
+            if (!isReviewMode) {
+                // 学習完了 -> クイズ開始（常に一番最初から）
+                isReviewMode = true;
+                subStepIdx = 0;
+                updateDisplay();
+            } else if (!isShowingAnswer) {
+                // クイズ回答表示
+                showAnswer();
+            } else {
+                // 正解して次へ
+                if (subStepIdx < maxIdx) {
+                    subStepIdx++;
+                    updateDisplay();
+                } else {
+                    // 現在の範囲を全てクリア
+                    if (maxIdx < rawData.length - 1) {
+                        maxIdx++;
+                        isReviewMode = false;
+                        subStepIdx = 0;
+                        updateDisplay();
+                    } else {
+                        // セット終了
+                        if (currentSet === 1) {
+                            alert("第1セット終了！第2セット（逆方向）を開始します。");
+                            initSet(2);
+                        } else {
+                            alert("全ての学習が完了しました！お疲れ様でした。");
+                            location.reload();
+                        }
+                    }
+                }
+            }
+        } else if (key.toLowerCase() === 'm' || key === 'ｍ') {
+            if (isReviewMode) {
+                alert("ミス！最初からやり直しです。");
+                maxIdx = 0;
+                subStepIdx = 0;
+                isReviewMode = false;
+                updateDisplay();
+            }
+        }
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.key.toLowerCase() === 'm' || e.key === 'ｍ') {
+            e.preventDefault();
+            handleInput(e.key);
+        }
+    });
+</script>
+
+</body>
+</html>
